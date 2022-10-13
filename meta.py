@@ -2,7 +2,6 @@
 meta.py: Metadata extraction code
 """
 
-import libxmp.utils
 import magic
 import mutagen
 import pikepdf
@@ -13,7 +12,6 @@ import tarfile
 import email
 from io import StringIO
 from io import BytesIO
-import xmp
 
 fulltext = False
 unparsed_counters = {}
