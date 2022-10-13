@@ -87,6 +87,7 @@ def search(args):
 @subcommand([])
 def drop(args):
     db.cursor().execute("delete from tags")
+    db.cursor().execute("delete from searchindex")
     db.commit()
 
 if __name__ == "__main__":
