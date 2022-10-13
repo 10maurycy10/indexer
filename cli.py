@@ -45,6 +45,7 @@ def insert(metadata_dict):
             if metadata[key]:
                 value = metadata[key]
                 db.cursor().execute("INSERT INTO tags (filename, tagname, tagvalue) values (?,?,?);", (filepath, key, value))
+                db.cursor().execute("INSERT INTO searchindex (filename, tagvalue) values (?,?);", (filepath, value))
 
 @subcommand([argument("--fulltext", action='store_true')])
 def freshen(args):
@@ -73,27 +74,15 @@ def freshen(args):
 #TODO implement intersection in sql
 def search(args):
     dbc = db.cursor()
+    keywords = " ".join(args.keywords)
     print("Performing filename search...")
-    matches = []
-    for keyword in args.keywords:
-        dbc.execute("SELECT filename FROM TAGS WHERE filename LIKE ? GROUP BY filename;", (f"%{keyword}%",))
-        matches.append([file for (file,) in dbc])
-    for result in list(set.intersection(*map(set,matches))):
-        print(f"> {result}")
-    print("Performing search...")
-    matches = []
-    for keyword in args.keywords:
-        dbc.execute("SELECT filename FROM TAGS WHERE tagname != 'fulltext' AND tagvalue LIKE ? GROUP BY filename;", (f"%{keyword}%",))
-        matches.append([file for (file,) in dbc])
-    for result in list(set.intersection(*map(set,matches))):
-        print(f"> {result}")
+    dbc.execute("SELECT filename FROM searchindex WHERE filename MATCH ? GROUP BY filename;", (keywords,))
+    for (file,) in dbc:
+        print("> ",file)
     print("Performing fulltext search...")
-    matches = []
-    for keyword in args.keywords:
-        dbc.execute("SELECT filename FROM TAGS WHERE tagvalue LIKE ? GROUP BY filename;", (f"%{keyword}%",))
-        matches.append([file for (file,) in dbc])
-    for result in list(set.intersection(*map(set,matches))):
-       print(f"> {result}")
+    dbc.execute("SELECT filename FROM searchindex WHERE tagvalue MATCH ? GROUP BY filename;", (keywords,))
+    for (file,) in dbc:
+        print("> ",file)
 
 @subcommand([])
 def drop(args):

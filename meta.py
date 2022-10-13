@@ -12,12 +12,17 @@ import zipfile
 import tarfile
 import email
 from io import StringIO
+from io import BytesIO
+import xmp
 
 fulltext = False
 unparsed_counters = {}
 error_counters = {}
 
 def file_email(file, path, d):
+    """
+    Extract metadata from email, then dump data of attachments
+    """
     msg = email.parser.BytesParser().parse(file)
     d[path]["title.main"] = msg.get("subject")
     d[path]["message.destination"] = msg.get("to")
@@ -25,33 +30,37 @@ def file_email(file, path, d):
     counter = 0
     for attachment in msg.walk():
         if not attachment.is_multipart():
-            payload = StringIO(attachment.get_payload())
+            payload = BytesIO(bytes(attachment.get_payload(), "utf-8"))
             attachment_path = f"{path};{str(counter)}"
             counter = counter + 1
             dumpdata_file(payload, attachment_path, d)
 
-## TODO open the zip and recurse
 def file_zip(file, path, d):
     """
-    Extract a zip file and extract metadata of contained files
+    Extract metadata of contained files in a zip archive
     """
     archive = zipfile.ZipFile(file)
-#    archive_info = archive.getinfo()
     for entry in archive.infolist():
         entry_name = f"{path};{entry.filename}"
-        dumpdata_file(archive.open(entry.filename,"r"), entry_name, d)
+        try:
+            dumpdata_file(archive.open(entry.filename,"r"), entry_name, d)
+        except RuntimeError:
+            pass
 
 def file_tar(file, path, d):
-    archive = tarfile.open(file)
+    """
+    Extracts metadata of Contained files
+    """
+    archive = tarfile.TarFile(fileobj=file)
     for entry in archive.getmembers():
         if entry.isfile():
-            entry_name = f"{path};{entry.filename}"
-            dumpdata_file(archive.extract(entry.filename), entry_name, d)
+            entry_name = f"{path};{entry.name}"
+            dumpdata_file(archive.extractfile(entry.name), entry_name, d)
 
 
 def file_gzip(file, path, d):
     """
-    gzip files dont have usefull metadata, so open it and extract metadata from the contained file
+    Unzips a file and dumps metadata
     """
     d[path]["gzip.extracted"] = "yes"
     innerpath = f"{path};decompressed"
@@ -59,6 +68,9 @@ def file_gzip(file, path, d):
     dumpdata_file(internal, innerpath, d)
 
 def file_mutagen(file, path, d):
+    """
+    Uses the mutagen library to extract metadata from audio files
+    """
     tag = mutagen.File(file)
     if tag:
         d[path]["author"] = tag.get("artist")
@@ -69,63 +81,50 @@ def file_mutagen(file, path, d):
         d[path]["generator"] = tag.get("software") or tag.get("encoder")
 
 def file_pdf(file, path, d):
-    from tempfile import NamedTemporaryFile
+        from pdfminer.pdfparser import PDFParser
+        from pdfminer.pdfdocument import PDFDocument
+        parser = PDFParser(file)
+        doc = PDFDocument(parser)
+        for meta in doc.info:
+            if "Producer" in meta:
+                d[path]["generator"] = meta["Producer"]
+            if "Author" in meta:
+                d[path]["author"] = meta["Author"]
+            if "ISBN" in meta:
+                d[path]["literature.ISBN"] = meta["ISBN"]
+            if "Title" in meta:
+                d[path]["title.main"] = meta["Title"]
+            if "Type" in meta:
+                d[path]["literature.type"] = meta["Type"]
+            if "Subject" in meta:
+                d[path]["title.sub"] = meta["Subject"]
+            if "Publisher" in meta:
+                d[path]["publisher"] = meta["Publisher"]
+            if "Publish Date" in meta:
+                d[path]["date.publication"] = meta["Publish Date"]
 
-    # Workarround to read XMP data
-    with NamedTemporaryFile() as f:
-        f.write(file.read())
-        xmp = libxmp.utils.file_to_dict(f.name)
+        for key in list(d[path].keys()):
+            if type(d[path][key]) != bytes and type(d[path][key]) != str:
+                del d[path][key]
 
-    if xmp:
-        print("Found XMP!")
-        for xmpns in xmp.values():
-            for key,value,properies in xmpns:
-                if "Creator" in key:
-                    d[path]["generator"] = value
-                elif "ModifyDate" in key:
-                    d[path]["date.modification"] = value
-                elif "CreateDate" in key:
-                    d[path]["date.creation"] = value
-                elif "title" in key:
-                    d[path]["title.main"] = value
-                elif "description" in key:
-                    d[path]["title.description"] = value
-                else:
-                    print(key)
-    elif False:
-        print("No XMP data, falling back to docinfo")
-        pdf = pikepdf.Pdf.open(file)
-        meta = pdf.open_metadata()
-        docinfo = pdf.docinfo
-        for key, value in docinfo.items():
-            # Skip keys which are not strings
-            try:
-                value = str(value)
-            except:
-                continue;
-            # Record the value
-            d[path][f"pdf.{key}"] = value
-            # Additionaly, record kown keys in a non pdf specific form.
-            match key:
-                case "/Author":
-                    d[path]["author"] = value
-                case "/Creator":
-                    d[path]["pdf.creator"] = value
-                case "/Producer":
-                    d[path]["generator"] = value
-                case "/Title":
-                    d[path]["title.main"] = value
-                case "/ModDate":
-                    d[path]["date.modification"] = value
-                case "/CreationDate":
-                    d[path]["date.creation"] = value
-                case "/ISBN":
-                    d[path]["literature.ISBN"] = value
-    if fulltext:
-        print("Extracting fulltext")
-        from pdfminer.high_level import extract_text
-        text = extract_text(file)
-        d[path]["fulltext"] = text
+        if fulltext:
+            from pdfminer.converter import TextConverter
+            from pdfminer.layout import LAParams
+            from pdfminer.pdfdocument import PDFDocument
+            from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+            from pdfminer.pdfpage import PDFPage
+            from pdfminer.pdfparser import PDFParser
+
+            output_string = StringIO()
+            rsrcmgr = PDFResourceManager()
+            device = TextConverter(rsrcmgr, output_string, laparams=LAParams())
+            interpreter = PDFPageInterpreter(rsrcmgr, device)
+            for page in PDFPage.create_pages(doc):
+                interpreter.process_page(page)
+            d[path]["fulltext"] = output_string.getvalue()
+
+
+
 
 def file_text(file,path, d):
     """
@@ -145,6 +144,7 @@ MIME_TYPES = {
     "message/rfc822": file_email,
     "text/csv": file_csv,
     "audio/ogg": file_mutagen,
+    "video/webm": file_mutagen,
     "video/mp4": file_mutagen,
     "audio/mp3": file_mutagen,
     "audio/webm": file_mutagen,
@@ -162,32 +162,41 @@ def dumpdata_file(file,name,d):
     """
     Writes the metadata of a file into d[name]
     """
-    print(name)
     # Read the first 2k, run libmagic, then seek back to the start
     header = file.read(2048)
     t = magic.from_buffer(header,mime=True)
     file.seek(0)
     d[name] = {"type": t}
     if t in MIME_TYPES:
-        #try:
+        try:
             MIME_TYPES[t](file,name,d)
-        #except Exception as e:
-        #    d[name]["bulk.error"] = str(e)
-        #    if t in unparsed_counters:
-        #        error_counters[t] = error_counters[t] + 1
-        #    else:
-        #        error_counters[t] = 1
+        except NotImplementedError:
+            pass
+        except zipfile.BadZipFile:
+            pass
+        except Exception as e:
+            raise e
+            d[name]["bulk.error"] = str(e)
+            if t in unparsed_counters:
+                error_counters[t] = error_counters[t] + 1
+            else:
+                error_counters[t] = 1
     else:
+        d[name]["bulk.parsed"] = "no"
         if t in unparsed_counters:
             unparsed_counters[t] = unparsed_counters[t] + 1
         else:
             unparsed_counters[t] = 1
-        return {} # Avoid taging unrecognized files for now
 
     # Convert list to semicolon delimited files
     for file in d.keys():
         metadata = d[file]
         for key in metadata.keys():
+            if type(metadata[key]) == bytes:
+                try:
+                    metadata[key] = metadata[key].decode("utf-8")
+                except Exception as e:
+                    metadata[key] = "INVALIDUTF8"
             if type(metadata[key]) == list:
                 metadata[key] = "; ".join(metadata[key])
     return d
