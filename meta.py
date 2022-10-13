@@ -2,6 +2,7 @@
 meta.py: Metadata extraction code
 """
 
+import libxmp.utils
 import magic
 import mutagen
 import pikepdf
@@ -68,36 +69,60 @@ def file_mutagen(file, path, d):
         d[path]["generator"] = tag.get("software") or tag.get("encoder")
 
 def file_pdf(file, path, d):
-    pdf = pikepdf.Pdf.open(file)
-    print("Got pdf")
-    meta = pdf.open_metadata()
-    print("Got meta")
-    docinfo = pdf.docinfo
-    for key, value in docinfo.items():
-        # Skip keys which are not strings
-        try:
-            value = str(value)
-        except:
-            continue;
-        # Record the value
-        d[path][f"pdf.{key}"] = value
-        # Additionaly, record kown keys in a non pdf specific form.
-        match key:
-            case "/Author":
-                d[path]["author"] = value
-            case "/Creator":
-                d[path]["pdf.creator"] = value
-            case "/Producer":
-                d[path]["generator"] = value
-            case "/Title":
-                d[path]["title.main"] = value
-            case "/ModDate":
-                d[path]["date.modification"] = value
-            case "/CreationDate":
-                d[path]["date.creation"] = value
-            case "/ISBN":
-                d[path]["literature.ISBN"] = value
+    from tempfile import NamedTemporaryFile
+
+    # Workarround to read XMP data
+    with NamedTemporaryFile() as f:
+        f.write(file.read())
+        xmp = libxmp.utils.file_to_dict(f.name)
+
+    if xmp:
+        print("Found XMP!")
+        for xmpns in xmp.values():
+            for key,value,properies in xmpns:
+                if "Creator" in key:
+                    d[path]["generator"] = value
+                elif "ModifyDate" in key:
+                    d[path]["date.modification"] = value
+                elif "CreateDate" in key:
+                    d[path]["date.creation"] = value
+                elif "title" in key:
+                    d[path]["title.main"] = value
+                elif "description" in key:
+                    d[path]["title.description"] = value
+                else:
+                    print(key)
+    elif False:
+        print("No XMP data, falling back to docinfo")
+        pdf = pikepdf.Pdf.open(file)
+        meta = pdf.open_metadata()
+        docinfo = pdf.docinfo
+        for key, value in docinfo.items():
+            # Skip keys which are not strings
+            try:
+                value = str(value)
+            except:
+                continue;
+            # Record the value
+            d[path][f"pdf.{key}"] = value
+            # Additionaly, record kown keys in a non pdf specific form.
+            match key:
+                case "/Author":
+                    d[path]["author"] = value
+                case "/Creator":
+                    d[path]["pdf.creator"] = value
+                case "/Producer":
+                    d[path]["generator"] = value
+                case "/Title":
+                    d[path]["title.main"] = value
+                case "/ModDate":
+                    d[path]["date.modification"] = value
+                case "/CreationDate":
+                    d[path]["date.creation"] = value
+                case "/ISBN":
+                    d[path]["literature.ISBN"] = value
     if fulltext:
+        print("Extracting fulltext")
         from pdfminer.high_level import extract_text
         text = extract_text(file)
         d[path]["fulltext"] = text
@@ -144,14 +169,14 @@ def dumpdata_file(file,name,d):
     file.seek(0)
     d[name] = {"type": t}
     if t in MIME_TYPES:
-        try:
+        #try:
             MIME_TYPES[t](file,name,d)
-        except Exception as e:
-            d[name]["bulk.error"] = str(e)
-            if t in unparsed_counters:
-                error_counters[t] = error_counters[t] + 1
-            else:
-                error_counters[t] = 1
+        #except Exception as e:
+        #    d[name]["bulk.error"] = str(e)
+        #    if t in unparsed_counters:
+        #        error_counters[t] = error_counters[t] + 1
+        #    else:
+        #        error_counters[t] = 1
     else:
         if t in unparsed_counters:
             unparsed_counters[t] = unparsed_counters[t] + 1
