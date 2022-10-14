@@ -1,172 +1,24 @@
 """
-meta.py: Metadata extraction code
+meta.py: Dispach metadata extraction
 """
 
 import magic
-import func_timeout
-import tempfile
-import mutagen
-import pikepdf
-import dateparser
-import gzip
 import zipfile
-import tarfile
-import email
-from io import StringIO
-from io import BytesIO
 
-fulltext = False
-use_tempfile = True
-unparsed_counters = {}
-error_counters = {}
+class Cfg:
+    fulltext = False
+    use_tempfile = True
+    unparsed_counters = {}
+    error_counters = {}
 
-def file_email(file, path, d):
-    """
-    Extract metadata from email, then dump data of attachments
-    """
-    msg = email.parser.BytesParser().parse(file)
-    d[path]["title.main"] = msg.get("subject")
-    d[path]["message.destination"] = msg.get("to")
-    d[path]["message.source"] = msg.get("from")
-    counter = 0
-    for attachment in msg.walk():
-        if not attachment.is_multipart():
-            payload = BytesIO(bytes(attachment.get_payload(), "utf-8"))
-            attachment_path = f"{path};{str(counter)}"
-            counter = counter + 1
-            dumpdata_file(payload, attachment_path, d)
-
-def file_zip(file, path, d):
-    """
-    Extract metadata of contained files in a zip archive
-    """
-    archive = zipfile.ZipFile(file)
-    for entry in archive.infolist():
-        entry_name = f"{path};{entry.filename}"
-        try:
-            if use_tempfile:
-                # Extract into tempfile
-                tfile = tempfile.TemporaryFile()
-                tfile.write(archive.open(entry.filename).read())
-                tfile.seek(0)
-                dumpdata_file(tfile, entry_name, d)
-                tfile.close()
-            else:
-                dumpdata_file(archive.open(entry.filename), entry_name, d)
-
-        except RuntimeError:
-            tfile.close()
-            pass
-
-def file_tar(file, path, d):
-    """
-    Extracts metadata of Contained files
-    """
-    archive = tarfile.TarFile(fileobj=file)
-    for entry in archive.getmembers():
-        if entry.isfile():
-            entry_name = f"{path};{entry.name}"
-            if use_tempfile:
-                tfile = tempfile.TemporaryFile()
-                tfile.write(archive.extractfile(entry.name).read())
-                tfile.seek(0)
-                dumpdata_file(tfile, entry_name, d)
-                tfile.close()
-            else:
-                dumpdata_file(archive.extractfile(entry.name), entry_name, d)
-
-def file_gzip(file, path, d):
-    """
-    Unzips a file and dumps metadata
-    """
-    d[path]["gzip.extracted"] = "yes"
-    innerpath = f"{path};decompressed"
-    internal = gzip.open(file, "rb")
-    dumpdata_file(internal, innerpath, d)
-
-def file_mutagen(file, path, d):
-    """
-    Uses the mutagen library to extract metadata from audio files
-    """
-    tag = mutagen.File(file)
-    if tag:
-        d[path]["author"] = tag.get("artist")
-        d[path]["title.series"] = tag.get("album")
-        d[path]["title.main"] = tag.get("title")
-        d[path]["title.number"] = tag.get("tracknumber")
-        d[path]["date.publication"] = tag.get("date")
-        d[path]["generator"] = tag.get("software") or tag.get("encoder")
-
-def file_pdf_inner(file, path, d):
-        from pdfminer.pdfparser import PDFParser
-        from pdfminer.pdfdocument import PDFDocument
-        parser = PDFParser(file)
-        doc = PDFDocument(parser)
-        for meta in doc.info:
-            if "Producer" in meta:
-                d[path]["generator"] = meta["Producer"]
-            if "Author" in meta:
-                d[path]["author"] = meta["Author"]
-            if "ISBN" in meta:
-                d[path]["literature.ISBN"] = meta["ISBN"]
-            if "Title" in meta:
-                d[path]["title.main"] = meta["Title"]
-            if "Type" in meta:
-                d[path]["literature.type"] = meta["Type"]
-            if "Subject" in meta:
-                d[path]["title.sub"] = meta["Subject"]
-            if "Publisher" in meta:
-                d[path]["publisher"] = meta["Publisher"]
-            if "Publish Date" in meta:
-                d[path]["date.publication"] = meta["Publish Date"]
-
-        for key in list(d[path].keys()):
-            if type(d[path][key]) != bytes and type(d[path][key]) != str:
-                del d[path][key]
-
-        # For improved indexing, use text on first page if no title is found
-        if fulltext or not "title.main" in d[path]:
-            from pdfminer.converter import TextConverter
-            from pdfminer.layout import LAParams
-            from pdfminer.pdfdocument import PDFDocument
-            from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-            from pdfminer.pdfpage import PDFPage
-            from pdfminer.pdfparser import PDFParser
-
-            output_string = StringIO()
-            rsrcmgr = PDFResourceManager()
-            device = TextConverter(rsrcmgr, output_string, laparams=LAParams())
-            interpreter = PDFPageInterpreter(rsrcmgr, device)
-            for page in PDFPage.create_pages(doc):
-                interpreter.process_page(page)
-                # If fulltext is not neded stop after a sigle page
-                if not fulltext:
-                    d[path]["pdf.firstpage"] = output_string.getvalue()
-                    return
-            d[path]["fulltext"] = output_string.getvalue()
-
-def file_pdf(file, path, d):
-    # Attempt to save to tempfile
-    try:
-        return func_timeout.func_timeout(120, file_pdf_inner, args=(file, path, d))
-    except func_timeout.FunctionTimedOut:
-        d[path]["pdf.timeout"] = "yes"
-
-def file_rtf(file,path,d):
-    print(path)
-    print("rtf")
-    raise NotImplementedError
-
-def file_text(file,path, d):
-    """
-    Text files don have any metadata, and the filesystem cant be trusted
-    """
-    if fulltext:
-        d[path]["fulltext"] = file.read()
-
-def file_csv(file,path,d):
-    header = file.readline()
-    d[path]["csv.header"] = header.decode("utf-8") 
+from filetypes.zip import file_zip
+from filetypes.gzip import file_gzip
+from filetypes.tar import file_tar
+from filetypes.pdf import file_pdf
+from filetypes.mutagen import file_mutagen
+from filetypes.text import file_text
+from filetypes.csv import file_csv
+from filetypes.email import file_email
 
 MIME_TYPES = {
     "application/zip": file_zip,
@@ -174,7 +26,6 @@ MIME_TYPES = {
     "application/x-tar": file_tar,
     "message/rfc822": file_email,
     "text/csv": file_csv,
-#    "text/rtf": file_rtf,
     "audio/ogg": file_mutagen,
     "video/webm": file_mutagen,
     "video/mp4": file_mutagen,
@@ -185,13 +36,13 @@ MIME_TYPES = {
     "application/gzip": file_gzip
 }
 
-def dumpdata(path, d):
+def dumpdata(path, d, cfg):
     """
     Writes the metadata of a file into d[path]
     """
-    return dumpdata_file(open(path, "rb"), path, d)
+    return dumpdata_file(open(path, "rb"), path, d, cfg)
 
-def dumpdata_file(file,name,d):
+def dumpdata_file(file,name,d, cfg):
     """
     Writes the metadata of a file into d[name]
     """
@@ -203,24 +54,23 @@ def dumpdata_file(file,name,d):
     d[name] = {"type": t}
     if t in MIME_TYPES:
         try:
-            MIME_TYPES[t](file,name,d)
+            MIME_TYPES[t](file,name, dumpdata_file,d, cfg)
         except NotImplementedError:
             pass
         except zipfile.BadZipFile:
             pass
         except Exception as e:
-            raise e
             d[name]["bulk.error"] = str(e)
-            if t in unparsed_counters:
-                error_counters[t] = error_counters[t] + 1
+            if t in cfg.unparsed_counters:
+                cfg.error_counters[t] = cfg.error_counters[t] + 1
             else:
-                error_counters[t] = 1
+                cfg.error_counters[t] = 1
     else:
         d[name]["bulk.parsed"] = "no"
-        if t in unparsed_counters:
-            unparsed_counters[t] = unparsed_counters[t] + 1
+        if t in cfg.unparsed_counters:
+            cfg.unparsed_counters[t] = cfg.unparsed_counters[t] + 1
         else:
-            unparsed_counters[t] = 1
+            cfg.unparsed_counters[t] = 1
 
     # Convert list to semicolon delimited files
     for file in d.keys():

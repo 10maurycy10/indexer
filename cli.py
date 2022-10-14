@@ -49,10 +49,11 @@ def insert(metadata_dict):
 
 @subcommand([argument("--fulltext", action='store_true'), argument("--no-tempfile", action="store_true")])
 def freshen(args):
+    cfg = meta.Cfg()
     if args.fulltext:
-        meta.fulltext = True
+        cfg.fulltext = True
     if args.no_tempfile:
-        meta.use_tempfile = False
+        cfg.use_tempfile = False
     indexed = db.get_tagged_files()
     to_index = db.get_indexed_dirs()
     files_to_index = []
@@ -66,9 +67,12 @@ def freshen(args):
 
     for filepath in tqdm.tqdm(files_to_index):
         metadata = {}
-        meta.dumpdata(filepath, metadata)
+        meta.dumpdata(filepath, metadata, cfg)
         insert(metadata)
         db.commit()
+    for key in cfg.error_counters.keys():
+        print(f"WARNING {cfg.error_counters[key]} files of type {key} could not be parsed.")
+        print(cfg.error_counters[key])
 
 
 @subcommand([argument("keywords", nargs="*")])
@@ -98,5 +102,3 @@ if __name__ == "__main__":
     else:
         args.func(args)
 
-for key in meta.error_counters.keys():
-    print(f"WARNING {meta.error_counters[key]} files of type {key} could not be parsed.")
