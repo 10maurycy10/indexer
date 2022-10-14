@@ -47,11 +47,12 @@ def insert(metadata_dict):
                 db.cursor().execute("INSERT INTO tags (filename, tagname, tagvalue) values (?,?,?);", (filepath, key, value))
                 db.cursor().execute("INSERT INTO searchindex (filename, tagvalue) values (?,?);", (filepath, value))
 
-@subcommand([argument("--fulltext", action='store_true')])
+@subcommand([argument("--fulltext", action='store_true'), argument("--no-tempfile", action="store_true")])
 def freshen(args):
     if args.fulltext:
-        print("Saving fulltext of files, this results in very *large* index.")
         meta.fulltext = True
+    if args.no_tempfile:
+        meta.use_tempfile = False
     indexed = db.get_tagged_files()
     to_index = db.get_indexed_dirs()
     files_to_index = []
@@ -76,11 +77,11 @@ def search(args):
     dbc = db.cursor()
     keywords = " ".join(args.keywords)
     print("Performing filename search...")
-    dbc.execute("SELECT filename FROM searchindex WHERE filename MATCH ? GROUP BY filename;", (keywords,))
+    dbc.execute("SELECT filename FROM searchindex WHERE filename MATCH ? GROUP BY filename ORDER BY RANK;", (keywords,))
     for (file,) in dbc:
         print("> ",file)
     print("Performing fulltext search...")
-    dbc.execute("SELECT filename FROM searchindex WHERE tagvalue MATCH ? GROUP BY filename;", (keywords,))
+    dbc.execute("SELECT filename FROM searchindex WHERE tagvalue MATCH ? GROUP BY filename ORDER BY RANK;", (keywords,))
     for (file,) in dbc:
         print("> ",file)
 

@@ -3,6 +3,8 @@ meta.py: Metadata extraction code
 """
 
 import magic
+import func_timeout
+import tempfile
 import mutagen
 import pikepdf
 import dateparser
@@ -14,6 +16,7 @@ from io import StringIO
 from io import BytesIO
 
 fulltext = False
+use_tempfile = True
 unparsed_counters = {}
 error_counters = {}
 
@@ -41,8 +44,18 @@ def file_zip(file, path, d):
     for entry in archive.infolist():
         entry_name = f"{path};{entry.filename}"
         try:
-            dumpdata_file(archive.open(entry.filename,"r"), entry_name, d)
+            if use_tempfile:
+                # Extract into tempfile
+                tfile = tempfile.TemporaryFile()
+                tfile.write(archive.open(entry.filename).read())
+                tfile.seek(0)
+                dumpdata_file(tfile, entry_name, d)
+                tfile.close()
+            else:
+                dumpdata_file(archive.open(entry.filename), entry_name, d)
+
         except RuntimeError:
+            tfile.close()
             pass
 
 def file_tar(file, path, d):
@@ -53,8 +66,14 @@ def file_tar(file, path, d):
     for entry in archive.getmembers():
         if entry.isfile():
             entry_name = f"{path};{entry.name}"
-            dumpdata_file(archive.extractfile(entry.name), entry_name, d)
-
+            if use_tempfile:
+                tfile = tempfile.TemporaryFile()
+                tfile.write(archive.extractfile(entry.name).read())
+                tfile.seek(0)
+                dumpdata_file(tfile, entry_name, d)
+                tfile.close()
+            else:
+                dumpdata_file(archive.extractfile(entry.name), entry_name, d)
 
 def file_gzip(file, path, d):
     """
@@ -78,7 +97,7 @@ def file_mutagen(file, path, d):
         d[path]["date.publication"] = tag.get("date")
         d[path]["generator"] = tag.get("software") or tag.get("encoder")
 
-def file_pdf(file, path, d):
+def file_pdf_inner(file, path, d):
         from pdfminer.pdfparser import PDFParser
         from pdfminer.pdfdocument import PDFDocument
         parser = PDFParser(file)
@@ -105,7 +124,8 @@ def file_pdf(file, path, d):
             if type(d[path][key]) != bytes and type(d[path][key]) != str:
                 del d[path][key]
 
-        if fulltext:
+        # For improved indexing, use text on first page if no title is found
+        if fulltext or not "title.main" in d[path]:
             from pdfminer.converter import TextConverter
             from pdfminer.layout import LAParams
             from pdfminer.pdfdocument import PDFDocument
@@ -119,10 +139,23 @@ def file_pdf(file, path, d):
             interpreter = PDFPageInterpreter(rsrcmgr, device)
             for page in PDFPage.create_pages(doc):
                 interpreter.process_page(page)
+                # If fulltext is not neded stop after a sigle page
+                if not fulltext:
+                    d[path]["pdf.firstpage"] = output_string.getvalue()
+                    return
             d[path]["fulltext"] = output_string.getvalue()
 
+def file_pdf(file, path, d):
+    # Attempt to save to tempfile
+    try:
+        return func_timeout.func_timeout(120, file_pdf_inner, args=(file, path, d))
+    except func_timeout.FunctionTimedOut:
+        d[path]["pdf.timeout"] = "yes"
 
-
+def file_rtf(file,path,d):
+    print(path)
+    print("rtf")
+    raise NotImplementedError
 
 def file_text(file,path, d):
     """
@@ -141,9 +174,11 @@ MIME_TYPES = {
     "application/x-tar": file_tar,
     "message/rfc822": file_email,
     "text/csv": file_csv,
+#    "text/rtf": file_rtf,
     "audio/ogg": file_mutagen,
     "video/webm": file_mutagen,
     "video/mp4": file_mutagen,
+    "audio/mpeg": file_mutagen,
     "audio/mp3": file_mutagen,
     "audio/webm": file_mutagen,
     "text/plain": file_text,
@@ -160,6 +195,7 @@ def dumpdata_file(file,name,d):
     """
     Writes the metadata of a file into d[name]
     """
+    print(name)
     # Read the first 2k, run libmagic, then seek back to the start
     header = file.read(2048)
     t = magic.from_buffer(header,mime=True)
