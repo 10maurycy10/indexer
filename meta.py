@@ -46,7 +46,6 @@ def dumpdata_file(file,name,d, cfg):
     """
     Writes the metadata of a file into d[name]
     """
-    print(name)
     # Read the first 2k, run libmagic, then seek back to the start
     header = file.read(2048)
     t = magic.from_buffer(header,mime=True)
