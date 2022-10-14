@@ -1,4 +1,6 @@
 # extractor(file, path, file_callback, dictionary, options)
+import mutagen
+
 def file_mutagen(file, path, callback, d, cfg):
     """
     Uses the mutagen library to extract metadata from audio files

@@ -1,9 +1,17 @@
 import func_timeout
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfparser import PDFParser
 from io import StringIO
+from pdfminer.pdfparser import PDFParser
+from pdfminer.pdfdocument import PDFDocument
+
+strip_chars = "\n\t ,.\x0c®"
 
 def file_pdf_inner(file, path, d, cfg):
-        from pdfminer.pdfparser import PDFParser
-        from pdfminer.pdfdocument import PDFDocument
         parser = PDFParser(file)
         doc = PDFDocument(parser)
         for meta in doc.info:
@@ -30,12 +38,6 @@ def file_pdf_inner(file, path, d, cfg):
 
         # For improved indexing, use text on first page if no title is found
         if cfg.fulltext or not "title.main" in d[path]:
-            from pdfminer.converter import TextConverter
-            from pdfminer.layout import LAParams
-            from pdfminer.pdfdocument import PDFDocument
-            from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-            from pdfminer.pdfpage import PDFPage
-            from pdfminer.pdfparser import PDFParser
 
             output_string = StringIO()
             rsrcmgr = PDFResourceManager()
@@ -43,11 +45,18 @@ def file_pdf_inner(file, path, d, cfg):
             interpreter = PDFPageInterpreter(rsrcmgr, device)
             for page in PDFPage.create_pages(doc):
                 interpreter.process_page(page)
-                # If fulltext is not neded stop after a sigle page
+                # If fulltext is not neded stop after a sigle page with text
                 if not cfg.fulltext:
-                    d[path]["pdf.firstpage"] = output_string.getvalue()
-                    return
-            d[path]["fulltext"] = output_string.getvalue()
+                    d[path]["pdf.firstpage"] = output_string.getvalue().strip(strip_chars)
+                    if len(d[path]["pdf.firstpage"]) > 0:
+                        return
+                    else:
+                        del d[path]["pdf.firstpage"]
+            d[path]["fulltext"] = output_string.getvalue().strip(strip_chars)
+            if len(d[path]["fulltext"]) < 1:
+                print(f"Warning: No text for {path}, try running OCR");
+        if not "title.main" in d[path] and not "pdf.firstpage" in d[path]:
+            print(f"Warning: No title or text for {path}, try running OCR.");
 
 def file_pdf(file, path, callback, d, cfg):
     # Attempt to save to tempfile

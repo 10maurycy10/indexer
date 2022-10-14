@@ -1,5 +1,6 @@
 import zipfile
 import tempfile
+import tqdm
 
 # extractor(file, path, file_callback, dictionary, options)
 def file_zip(file, path, dumpdata_file, d, cfg):
@@ -7,7 +8,7 @@ def file_zip(file, path, dumpdata_file, d, cfg):
     Extract metadata of contained files in a zip archive
     """
     archive = zipfile.ZipFile(file)
-    for entry in archive.infolist():
+    for entry in tqdm.tqdm(archive.infolist()):
         entry_name = f"{path};{entry.filename}"
         try:
             if cfg.use_tempfile:

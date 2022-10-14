@@ -1,7 +1,7 @@
 """
 meta.py: Metadata extraction code
 """
-import email
+import email.parser
 from io import StringIO
 from io import BytesIO
 

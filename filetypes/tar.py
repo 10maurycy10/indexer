@@ -1,5 +1,6 @@
 import tempfile
 import tarfile
+import tqdm
 
 # extractor(file, path, file_callback, dictionary, options)
 def file_tar(file, path, callback, d, cfg):
@@ -7,7 +8,7 @@ def file_tar(file, path, callback, d, cfg):
     Extracts metadata of Contained files
     """
     archive = tarfile.TarFile(fileobj=file)
-    for entry in archive.getmembers():
+    for entry in tqdm.tqdm(archive.getmembers()):
         if entry.isfile():
             entry_name = f"{path};{entry.name}"
             if cfg.use_tempfile:
