@@ -7,7 +7,6 @@ class DB:
         dbc.execute("CREATE TABLE IF NOT EXISTS tags (filename TEXT, tagname TEXT, tagvalue TEXT);")
         dbc.execute("CREATE VIRTUAL TABLE IF NOT EXISTS searchindex USING FTS5(filename, tagvalue)")
         dbc.execute("CREATE INDEX IF NOT EXISTS name ON tags (filename)")
-        dbc.execute("CREATE TABLE IF NOT EXISTS fulltext (filename TEXT, fulltext TEXT);")
         dbc.execute("CREATE TABLE IF NOT EXISTS indexed_dirs (filepath TEXT);")
         self.db.commit()
 
