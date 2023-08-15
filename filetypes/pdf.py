@@ -8,6 +8,7 @@ from pdfminer.pdfparser import PDFParser
 from io import StringIO
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument
+import tqdm
 
 strip_chars = "\n\t ,.\x0c®"
 
@@ -38,12 +39,11 @@ def file_pdf_inner(file, path, d, cfg):
 
         # For improved indexing, use text on first page if no title is found
         if cfg.fulltext or not "title.main" in d[path]:
-
             output_string = StringIO()
             rsrcmgr = PDFResourceManager()
             device = TextConverter(rsrcmgr, output_string, laparams=LAParams())
             interpreter = PDFPageInterpreter(rsrcmgr, device)
-            for page in PDFPage.create_pages(doc):
+            for page in tqdm.tqdm(PDFPage.create_pages(doc), position=cfg.depth+1, postfix=path):
                 interpreter.process_page(page)
                 # If fulltext is not neded stop after a sigle page with text
                 if not cfg.fulltext:
